@@ -434,7 +434,7 @@
       <span><i class="green"></i> методический день</span>
       <span><i class="free"></i> свободный слот</span>
       <span><i class="candidate"></i> предложенный слот</span>
-      <span><i class="applied"></i> добавленная консультация</span>
+      <span><i class="applied"></i> добавленная/перенесённая пара</span>
       <span><i class="selected"></i> выбранная ячейка</span>
       <span><i class="blocked"></i> заблокировано (✕ в углу слота)</span>
     </div>
@@ -706,7 +706,7 @@ function shiftLabel(shift){
   return shift===1 ? '1 смена, пары 1-4 (08:00-14:00)' : shift===2 ? '2 смена, пары 5-8 (14:00-20:00)' : 'смена не определена';
 }
 
-/* Реальные пары группы в этот день (из GROUPS + перестановок movedPairs + добавленных консультаций) */
+/* Реальные пары группы в этот день (из GROUPS + перестановок movedPairs + добавленных пар) */
 function groupDayNums(groupNorm, day){
   const nums = new Set();
   GROUP_LIST.forEach(g=>{
@@ -910,6 +910,7 @@ function dayLabelBase(d){ return {'ПН':'Понедельник','ВТ':'Вто
 function renderTeacherHeader(){
   const sched = effectiveSchedule(currentTeacher);
   const applied = (extras[currentTeacher]||[]).length;
+  const movedOwn = movedPairs.filter(m=>m.teacher===currentTeacher).length;
   const total = busyCount(sched) + applied;
   const green = computeGreenDay(currentTeacher);
   document.getElementById('teacherHeader').innerHTML = `
@@ -917,7 +918,8 @@ function renderTeacherHeader(){
     <div class="stats">
       <span>Нагрузка: <b>${total} пар/нед</b></span>
       <span>Методический день: <b>${dayLabelBase(green)}</b></span>
-      ${applied ? `<span>Добавлено консультаций: <b>${applied}</b></span>` : ''}
+      ${applied ? `<span>Добавлено пар: <b>${applied}</b></span>` : ''}
+      ${movedOwn ? `<span>Перенесено пар: <b>${movedOwn}</b></span>` : ''}
     </div>`;
 }
 
@@ -961,12 +963,12 @@ function renderSelectionBanner(){
   if(!selectedSlot) return '';
   if(selectedSlot.type==='reference'){
     return `<div class="sel-banner">
-      <div class="sel-banner-text">📌 Выбрана пара: <b>${dayLabelBase(selectedSlot.day)}, ${selectedSlot.num}-я</b> · ${selectedSlot.subj} · <span class="mono">${selectedSlot.group}</span>${selectedSlot.room ? ', ауд. '+selectedSlot.room : ''}<br><span class="sel-hint">Запрос ниже будет считаться относящимся к этой группе, если группу не указать явно.</span></div>
+      <div class="sel-banner-text">📌 Выбрана пара: <b>${dayLabelBase(selectedSlot.day)}, ${selectedSlot.num}-я</b> · ${selectedSlot.subj} · <span class="mono">${selectedSlot.group}</span>${selectedSlot.room ? ', ауд. '+selectedSlot.room : ''}<br><span class="sel-hint">Если выбрать новый слот, эта же пара переедет туда (старое время освободится). Группу можно не указывать в запросе.</span></div>
       <button class="sel-clear" onclick="clearSelection()">✕</button>
     </div>`;
   }
   return `<div class="sel-banner">
-    <div class="sel-banner-text">📌 Выбран слот: <b>${dayLabelBase(selectedSlot.day)}, ${selectedSlot.num}-я</b> (${TIMES[selectedSlot.num]})<br><span class="sel-hint">Новая пара/консультация будет поставлена именно сюда, если слот подойдёт.</span></div>
+    <div class="sel-banner-text">📌 Выбран слот: <b>${dayLabelBase(selectedSlot.day)}, ${selectedSlot.num}-я</b> (${TIMES[selectedSlot.num]})<br><span class="sel-hint">Новая пара будет поставлена именно сюда, если слот подойдёт.</span></div>
     <button class="sel-clear" onclick="clearSelection()">✕</button>
   </div>`;
 }
@@ -1005,7 +1007,7 @@ function renderGrid(){
       let cls='cellbox', content='', clickAttr='';
       if(isApplied){
         cls += ' applied';
-        content = `<div class="subj">Консультация</div><div class="grp"><span>${isApplied.group}</span><span>${isApplied.room ? 'ауд. '+isApplied.room : ''}</span></div>`;
+        content = `<div class="subj">${isApplied.subj || 'Доп. пара'}</div><div class="grp"><span>${isApplied.group}</span><span>${isApplied.room ? 'ауд. '+isApplied.room : ''}</span></div>`;
       } else if(isCand){
         cls += ' candidate' + (isChosen?' chosen':'');
         content = `+ добавить сюда${isCand.room ? '<br>ауд. '+isCand.room : ''}`;
@@ -1053,9 +1055,17 @@ function onCellClick(day, num){
 function applyChosen(){
   if(!lastAnalysis || !lastAnalysis.chosen) return;
   const t = lastAnalysis.teacher;
-  extras[t] = extras[t] || [];
-  extras[t].push({day:lastAnalysis.chosen.day, num:lastAnalysis.chosen.num, group:lastAnalysis.groupRaw.toUpperCase(), room:lastAnalysis.chosen.room});
-  lastAnalysis.applied = {...lastAnalysis.chosen};
+  const day = lastAnalysis.chosen.day, num = lastAnalysis.chosen.num, room = lastAnalysis.chosen.room;
+  if(selectedSlot && selectedSlot.type==='reference'){
+    movedPairs.push({teacher:t, fromDay:selectedSlot.day, fromNum:selectedSlot.num, toDay:day, toNum:num, subj:selectedSlot.subj, group:selectedSlot.group, room: room || selectedSlot.room});
+    lastAnalysis.applied = {day, num, room: room || selectedSlot.room, subj: selectedSlot.subj};
+  } else {
+    extras[t] = extras[t] || [];
+    extras[t].push({day, num, group:lastAnalysis.groupRaw.toUpperCase(), room, subj:'Доп. пара'});
+    lastAnalysis.applied = {day, num, room};
+  }
+  lastAnalysis.candidates = [];
+  lastAnalysis.chosen = null;
   selectedSlot = null;
   renderTeacherHeader();
   renderGrid();
@@ -1087,7 +1097,7 @@ function renderAdvancedOptions(a){
       <h4>Переставить пару другого преподавателя</h4>
       <p class="val">«${m.blockingSubj}» (${m.blockingTeacher}) занимает нужное время у группы ${m.group}: <b>${dayLabelBase(m.from.day)}, ${m.from.num}-я</b>.
       Можно перенести её на <b>${dayLabelBase(m.to.day)}, ${m.to.num}-я</b> (${TIMES[m.to.num]}) — там ${m.blockingTeacher} свободен, группа тоже, часы не теряются, окна не образуется.
-      Освободившееся время займёт консультация для ${a.groupNorm}.</p>
+      Освободившееся время займёт пара для ${a.groupNorm}.</p>
       <button class="apply-btn" onclick="applyMoveSuggestion(${i})">Переставить и добавить пару</button>
     </div>`;
   });
@@ -1099,7 +1109,7 @@ function renderAdvancedOptions(a){
       : '';
     html += `<div class="adv-block">
       <h4>Задействовать методический день</h4>
-      <p class="val">${movesText}После этого в ${dayLabelBase(a.greenDay).toLowerCase()} будет <b>${plan.resultingTotal} пар(ы)</b> — день перестаёт быть «пустым» и его можно занять, добавив консультацию для ${a.groupNorm} на <b>${plan.slot.num}-ю пару</b> (${TIMES[plan.slot.num]}).</p>
+      <p class="val">${movesText}После этого в ${dayLabelBase(a.greenDay).toLowerCase()} будет <b>${plan.resultingTotal} пар(ы)</b> — день перестаёт быть «пустым» и его можно занять, добавив пару для ${a.groupNorm} на <b>${plan.slot.num}-ю пару</b> (${TIMES[plan.slot.num]}).</p>
       <button class="apply-btn" onclick="applyGreenDayPlan()">${plan.moves.length ? 'Переставить и ' : ''}Добавить пару в методический день</button>
     </div>`;
   }
@@ -1117,13 +1127,18 @@ function applyMoveSuggestion(i){
   movedPairs.push({teacher:m.blockingTeacher, fromDay:m.from.day, fromNum:m.from.num, toDay:m.to.day, toNum:m.to.num, subj:m.blockingSubj, group:m.group, room:destRoom});
 
   const t = lastAnalysis.teacher;
-  extras[t] = extras[t] || [];
   const newRoom = lookupRoom(m.from.day, m.from.num, m.group);
-  extras[t].push({day:m.from.day, num:m.from.num, group:m.group, room:newRoom});
+  if(selectedSlot && selectedSlot.type==='reference'){
+    movedPairs.push({teacher:t, fromDay:selectedSlot.day, fromNum:selectedSlot.num, toDay:m.from.day, toNum:m.from.num, subj:selectedSlot.subj, group:selectedSlot.group, room: newRoom || selectedSlot.room});
+    lastAnalysis.applied = {day:m.from.day, num:m.from.num, room:newRoom || selectedSlot.room, subj:selectedSlot.subj};
+  } else {
+    extras[t] = extras[t] || [];
+    extras[t].push({day:m.from.day, num:m.from.num, group:m.group, room:newRoom, subj:'Доп. пара'});
+    lastAnalysis.applied = {day:m.from.day, num:m.from.num, room:newRoom};
+  }
 
-  lastAnalysis.applied = {day:m.from.day, num:m.from.num, room:newRoom};
-  lastAnalysis.candidates = [{day:m.from.day, num:m.from.num, room:newRoom}];
-  lastAnalysis.chosen = lastAnalysis.candidates[0];
+  lastAnalysis.candidates = [];
+  lastAnalysis.chosen = null;
   lastAnalysis.viaMove = m;
   selectedSlot = null;
   renderTeachersTab();
@@ -1140,14 +1155,20 @@ function applyGreenDayPlan(){
     movedPairs.push({teacher:t, fromDay:m.fromDay, fromNum:m.fromNum, toDay:m.toDay, toNum:m.toNum, subj:m.subj, group:m.group, room});
   });
 
-  extras[t] = extras[t] || [];
   const newRoomBase = mostCommonRoom(t);
   const newRoom = newRoomBase && !roomBusyAt(plan.slot.day, plan.slot.num, newRoomBase) ? newRoomBase : null;
-  extras[t].push({day:plan.slot.day, num:plan.slot.num, group:lastAnalysis.groupRaw.toUpperCase(), room:newRoom});
 
-  lastAnalysis.applied = {day:plan.slot.day, num:plan.slot.num, room:newRoom};
-  lastAnalysis.candidates = [{day:plan.slot.day, num:plan.slot.num, room:newRoom}];
-  lastAnalysis.chosen = lastAnalysis.candidates[0];
+  if(selectedSlot && selectedSlot.type==='reference'){
+    movedPairs.push({teacher:t, fromDay:selectedSlot.day, fromNum:selectedSlot.num, toDay:plan.slot.day, toNum:plan.slot.num, subj:selectedSlot.subj, group:selectedSlot.group, room: newRoom || selectedSlot.room});
+    lastAnalysis.applied = {day:plan.slot.day, num:plan.slot.num, room:newRoom || selectedSlot.room, subj:selectedSlot.subj};
+  } else {
+    extras[t] = extras[t] || [];
+    extras[t].push({day:plan.slot.day, num:plan.slot.num, group:lastAnalysis.groupRaw.toUpperCase(), room:newRoom, subj:'Доп. пара'});
+    lastAnalysis.applied = {day:plan.slot.day, num:plan.slot.num, room:newRoom};
+  }
+
+  lastAnalysis.candidates = [];
+  lastAnalysis.chosen = null;
   lastAnalysis.viaGreenDay = plan;
   selectedSlot = null;
   renderTeachersTab();
@@ -1160,7 +1181,7 @@ function renderSteps(){
 
   if(!lastAnalysis){
     html += selectedSlot
-      ? `<div class="empty-hint">Слот выбран. Теперь просто напишите внизу, что нужно сделать — группу и преподавателя можно не повторять, если они уже ясны из выбора.<span class="ex">Например: «нужна консультация»</span></div>`
+      ? `<div class="empty-hint">Слот выбран. Теперь просто напишите внизу, что нужно сделать — группу и преподавателя можно не повторять, если они уже ясны из выбора.<span class="ex">Например: «нужна ещё одна такая же пара»</span></div>`
       : `<div class="empty-hint">Напишите внизу, кому и с какой группой нужна пара — шаги появятся здесь. Либо кликните по паре или свободной ячейке в сетке справа, чтобы указать её сразу.<span class="ex">Например: «Динисламу нужна ещё одна пара с 24 РПО 1»</span></div>`;
     panel.innerHTML = html;
     return;
@@ -1198,6 +1219,27 @@ function renderSteps(){
     html += stepHtml(6, a.rulesExcluded ? 'warn' : 'done', 'Правила группы', `<p class="val">Проверяем: не больше 4 пар/день, без окон, смена по курсу (26/23 — 1 смена, 24/25 — 2 смена).${a.rulesExcluded ? ` Исключено ещё ${a.rulesExcluded} слот(ов): ${a.ruleReasons.join('; ')}.` : ' Нарушений нет.'} Осталось <b>${a.candidates.length}</b> подходящих.</p>`);
   }
 
+  if(a.applied){
+    let note = '✅ Расписание обновлено. Основные пары не изменены, методический день не тронут, правила группы соблюдены.';
+    if(a.viaMove){
+      note = `✅ «${a.viaMove.blockingSubj}» (${a.viaMove.blockingTeacher}) перенесена на ${dayLabelBase(a.viaMove.to.day).toLowerCase()}, ${a.viaMove.to.num}-ю пару. Часы не потеряны, окон не образовалось.`;
+    } else if(a.viaGreenDay){
+      note = a.viaGreenDay.moves.length
+        ? `✅ Методический день задействован: перенесено ${a.viaGreenDay.moves.length} пар(ы), теперь в этот день ${a.viaGreenDay.resultingTotal} пар — день больше не пустует.`
+        : `✅ Методический день задействован — после добавления в нём ${a.viaGreenDay.resultingTotal} пар(ы).`;
+    }
+    const isMove = !!a.applied.subj;
+    const stepTitle = isMove ? 'Пара перенесена' : 'Пара добавлена';
+    const mainLine = isMove
+      ? `${dayLabelBase(a.applied.day)}, ${a.applied.num}-я пара (${TIMES[a.applied.num]})${a.applied.room ? ', ауд. '+a.applied.room : ''} — «${a.applied.subj}» (${a.groupNorm}) переехала сюда со старого времени, старый слот теперь свободен.`
+      : `${dayLabelBase(a.applied.day)}, ${a.applied.num}-я пара (${TIMES[a.applied.num]})${a.applied.room ? ', ауд. '+a.applied.room : ''} — дополнительная пара для группы ${a.groupNorm}.`;
+    html += stepHtml(7,'done', stepTitle, `<p class="val">${mainLine}</p>
+      <div class="applied-note">${note}</div>
+      <button class="reset-link" onclick="resetAll()">Сбросить всё и начать заново</button>`);
+    panel.innerHTML = html;
+    return;
+  }
+
   if(a.candidates.length===0){
     const reasonNote = a.ruleReasons && a.ruleReasons.length ? ` Основная причина: ${a.ruleReasons[0]}.` : '';
     html += stepHtml(7,'warn','Слот не найден напрямую', `<p class="val">Нет свободного слота без конфликтов и нарушений правил.${reasonNote}</p>`);
@@ -1217,24 +1259,11 @@ function renderSteps(){
   });
   candHtml += '</div>';
 
-  if(a.applied){
-    let note = '✅ Расписание обновлено. Основные пары не изменены, методический день не тронут, правила группы соблюдены.';
-    if(a.viaMove){
-      note = `✅ «${a.viaMove.blockingSubj}» (${a.viaMove.blockingTeacher}) перенесена на ${dayLabelBase(a.viaMove.to.day).toLowerCase()}, ${a.viaMove.to.num}-ю пару. Часы не потеряны, окон не образовалось.`;
-    } else if(a.viaGreenDay){
-      note = a.viaGreenDay.moves.length
-        ? `✅ Методический день задействован: перенесено ${a.viaGreenDay.moves.length} пар(ы), теперь в этот день ${a.viaGreenDay.resultingTotal} пар — день больше не пустует.`
-        : `✅ Методический день задействован — после добавления в нём ${a.viaGreenDay.resultingTotal} пар(ы).`;
-    }
-    html += stepHtml(7,'done','Пара добавлена', `<p class="val">${dayLabelBase(a.applied.day)}, ${a.applied.num}-я пара (${TIMES[a.applied.num]})${a.applied.room ? ', ауд. '+a.applied.room : ''} — консультация для группы ${a.groupNorm}.</p>
-      <div class="applied-note">${note}</div>
-      <button class="reset-link" onclick="resetAll()">Сбросить всё и начать заново</button>`);
-  } else {
-    html += stepHtml(7,'active','Предложенный слот', `<p class="val">${a.candidates.length===1 ? 'Подтвердите слот.' : 'Выберите вариант (или кликните жёлтую ячейку в сетке справа), затем подтвердите.'}</p>${candHtml}
-      <button class="apply-btn" ${a.chosen?'':'disabled'} onclick="applyChosen()">Добавить пару в расписание</button>`);
-  }
+  html += stepHtml(7,'active','Предложенный слот', `<p class="val">${a.candidates.length===1 ? 'Подтвердите слот.' : 'Выберите вариант (или кликните жёлтую ячейку в сетке справа), затем подтвердите.'}</p>${candHtml}
+      <button class="apply-btn" ${a.chosen?'':'disabled'} onclick="applyChosen()">${selectedSlot && selectedSlot.type==='reference' ? 'Перенести пару сюда' : 'Добавить пару в расписание'}</button>`);
   panel.innerHTML = html;
 }
+
 
 function runQuery(text){
   const raw = text.trim();
@@ -1468,9 +1497,9 @@ function computeOptimizations(){
   }
 
   // 6. applied consultations summary
-  const appliedCount = Object.values(extras).reduce((s,a)=>s+a.length,0);
+  const appliedCount = Object.values(extras).reduce((s,a)=>s+a.length,0) + movedPairs.length;
   if(appliedCount>0){
-    items.push({level:'low', text:`За сессию добавлено консультаций: <b>${appliedCount}</b>. Основное расписание при этом не менялось — 0 пар сдвинуто.`});
+    items.push({level:'low', text:`За сессию добавлено/перенесено пар: <b>${appliedCount}</b>. Основное расписание при этом не менялось сверх того, что вы сами подтвердили.`});
   }
 
   return items;
